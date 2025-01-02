@@ -156,11 +156,11 @@ async fn handle_request(
 ) -> Result<HttpResponse> {
     match discord_endpoint_check(&request, &body, &state) {
         DiscordEndpointResponse::Unauthorized => {
-            println!("{} {} 401", request.method(), request.uri().path());
+            println!("401 {} {}", request.method(), request.uri());
             return Ok(HttpResponse::Unauthorized().finish());
         }
         DiscordEndpointResponse::DuplicateEvent => {
-            println!("DUPLICATE {} {}", request.method(), request.uri().path());
+            println!("DUPLICATE {} {}", request.method(), request.uri());
             return Ok(HttpResponse::Ok()
                 .content_type("text/plain")
                 .body("DUPLICATE_EVENT"));
@@ -168,9 +168,9 @@ async fn handle_request(
         DiscordEndpointResponse::Valid => {}
     }
 
-    println!("{} {}", request.method(), request.uri().path());
+    println!("{} {}", request.method(), request.uri());
 
-    let forward_url = format!("{}{}", state.forward_url.trim_end_matches('/'), request.uri().path().to_string());
+    let forward_url = format!("{}{}", state.forward_url.trim_end_matches('/'), request.uri().to_string());
 
     let mut forward = state.client
         .request(request.method().clone(), &forward_url)

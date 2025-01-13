@@ -3,8 +3,6 @@ use std::{sync::Arc, time::Duration};
 
 use actix_web::{http::header, web, App, HttpRequest, HttpResponse, HttpServer, Result};
 use dashmap::DashMap;
-use ed25519_dalek::{PublicKey, Signature, Verifier};
-use hex::FromHex;
 use sha2::{Digest, Sha256};
 use tokio::time::sleep;
 
@@ -12,7 +10,6 @@ use tokio::time::sleep;
 struct AppState {
     forward_url: String,
     hash_store: Arc<DashMap<String, ()>>,
-    discord_public_key: PublicKey,
     master_token: String,
     client: reqwest::Client,
 }
@@ -22,7 +19,6 @@ enum DiscordEndpointResponse {
     DuplicateEvent,
     Valid
 }
-
 
 fn normalize_sequence(bytes: &[u8]) -> Vec<u8> {
     let pattern = [0x22, 0x73, 0x22, 0x3A]; // "s":
@@ -41,32 +37,6 @@ fn normalize_sequence(bytes: &[u8]) -> Vec<u8> {
     }
 
     result
-}
-
-fn verify_discord_signature(
-    timestamp: &str,
-    body: &[u8],
-    signature: &str,
-    public_key: &PublicKey,
-) -> bool {
-    let message = format!("{}{}", timestamp, String::from_utf8_lossy(body));
-
-    match Vec::from_hex(signature) {
-        Ok(sig_bytes) => {
-            if sig_bytes.len() != 64 {
-                return false;
-            }
-            let mut fixed_sig = [0u8; 64];
-            fixed_sig.copy_from_slice(&sig_bytes);
-
-            if let Ok(signature) = Signature::from_bytes(&fixed_sig) {
-                public_key.verify(message.as_bytes(), &signature).is_ok()
-            } else {
-                false
-            }
-        }
-        Err(_) => false,
-    }
 }
 
 fn discord_endpoint_check(
@@ -97,25 +67,6 @@ fn discord_endpoint_check(
         .and_then(|h| h.to_str().ok());
 
     match (is_discord_webhook, auth_header) {
-            (true, None) => {
-                let timestamp = request
-                    .headers()
-                    .get("X-Signature-Timestamp")
-                    .and_then(|h| h.to_str().ok());
-                let signature = request
-                    .headers()
-                    .get("X-Signature-Ed25519")
-                    .and_then(|h| h.to_str().ok());
-    
-                match (timestamp, signature) {
-                    (Some(ts), Some(sig)) => {
-                        if !verify_discord_signature(ts, &body, sig, &state.discord_public_key) {
-                            return DiscordEndpointResponse::Unauthorized;
-                        }
-                    }
-                    _ => return DiscordEndpointResponse::Unauthorized,
-                }
-            }
             (false, Some(token)) => {
                 if token != state.master_token {
                     return DiscordEndpointResponse::Unauthorized;
@@ -209,20 +160,12 @@ async fn handle_request(
 async fn main() -> std::io::Result<()> {
     let forward_url = std::env::var("FORWARD_URL")
         .expect("FORWARD_URL environment variable must be set");
-    let discord_public_key = std::env::var("DISCORD_PUBLIC_KEY")
-        .expect("DISCORD_PUBLIC_KEY environment variable must be set");
     let master_token = std::env::var("MASTER_TOKEN")
         .expect("MASTER_TOKEN environment variable must be set");
-
-    let public_key_bytes = <[u8; 32]>::from_hex(discord_public_key)
-        .expect("Invalid Discord public key format");
-    let discord_public_key = PublicKey::from_bytes(&public_key_bytes)
-        .expect("Invalid Discord public key");
 
     let app_state = web::Data::new(AppState {
         forward_url,
         hash_store: Arc::new(DashMap::new()),
-        discord_public_key,
         master_token,
         client: reqwest::Client::new()
     });

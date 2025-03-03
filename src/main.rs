@@ -9,6 +9,7 @@ use tokio::time::sleep;
 
 struct AppState {
     forward_url: String,
+    interaction_url: String,
     hash_store: Arc<DashMap<String, ()>>,
     master_token: String,
     client: reqwest::Client,
@@ -121,7 +122,17 @@ async fn handle_request(
 
     println!("{} {}", request.method(), request.uri());
 
-    let forward_url = format!("{}{}", state.forward_url.trim_end_matches('/'), request.uri().to_string());
+    let forward_url = format!(
+        "{}{}",
+        (
+            if request.uri().path().contains("interaction") {
+                state.interaction_url.clone()
+            } else {
+                state.forward_url.clone()
+            }
+        ).trim_end_matches('/'),
+        request.uri().to_string()
+    );
 
     let mut forward = state.client
         .request(request.method().clone(), &forward_url)
@@ -160,11 +171,14 @@ async fn handle_request(
 async fn main() -> std::io::Result<()> {
     let forward_url = std::env::var("FORWARD_URL")
         .expect("FORWARD_URL environment variable must be set");
+    let interaction_url = std::env::var("INTERACTION_URL")
+        .expect("INTERACTION_URL environment variable must be set");
     let master_token = std::env::var("MASTER_TOKEN")
         .expect("MASTER_TOKEN environment variable must be set");
 
     let app_state = web::Data::new(AppState {
         forward_url,
+        interaction_url,
         hash_store: Arc::new(DashMap::new()),
         master_token,
         client: reqwest::Client::new()
